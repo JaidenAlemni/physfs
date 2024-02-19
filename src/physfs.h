@@ -2779,6 +2779,8 @@ typedef PHYSFS_EnumerateCallbackResult (*PHYSFS_EnumerateCallback)(void *data,
  */
 PHYSFS_DECL int PHYSFS_enumerate(const char *dir, PHYSFS_EnumerateCallback c,
                                  void *d);
+PHYSFS_DECL int PHYSFS_enumerateFromMountPoint(const char *dir, PHYSFS_EnumerateCallback c,
+                                 void *d, const char *mountPoint);
 
 
 /**

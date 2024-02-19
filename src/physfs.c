@@ -2538,6 +2538,11 @@ static PHYSFS_EnumerateCallbackResult enumCallbackFilterSymLinks(void *_data,
 
 int PHYSFS_enumerate(const char *_fn, PHYSFS_EnumerateCallback cb, void *data)
 {
+    return PHYSFS_enumerateFromMountPoint(_fn, cb, data, 0);
+}
+
+int PHYSFS_enumerateFromMountPoint(const char *_fn, PHYSFS_EnumerateCallback cb, void *data, const char *mountPoint)
+{
     PHYSFS_EnumerateCallbackResult retval = PHYSFS_ENUM_OK;
     size_t len;
     char *allocated_fname;
@@ -2568,6 +2573,9 @@ int PHYSFS_enumerate(const char *_fn, PHYSFS_EnumerateCallback cb, void *data)
 
         for (i = searchPath; (retval == PHYSFS_ENUM_OK) && i; i = i->next)
         {
+            if (mountPoint && strcmp(i->dirName, mountPoint) != 0)
+                continue;
+
             char *arcfname = fname;
 
             if (partOfMountPoint(i, arcfname))
@@ -2605,6 +2613,8 @@ int PHYSFS_enumerate(const char *_fn, PHYSFS_EnumerateCallback cb, void *data)
                                                  cb, _fn, data);
                 } /* else */
             } /* else if */
+            if (mountPoint)
+                break;
         } /* for */
 
     } /* if */
