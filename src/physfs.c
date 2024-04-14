@@ -3138,6 +3138,11 @@ int PHYSFS_flush(PHYSFS_File *handle)
 
 int PHYSFS_stat(const char *_fname, PHYSFS_Stat *stat)
 {
+    return PHYSFS_statFromMountPoint(_fname, stat, 0);
+}
+
+int PHYSFS_statFromMountPoint(const char *_fname, PHYSFS_Stat *stat, const char *mountPoint)
+{
     int retval = 0;
     char *allocated_fname;
     char *fname;
@@ -3174,6 +3179,8 @@ int PHYSFS_stat(const char *_fname, PHYSFS_Stat *stat)
             int exists = 0;
             for (i = searchPath; ((i != NULL) && (!exists)); i = i->next)
             {
+                if (mountPoint && strcmp(i->dirName, mountPoint) != 0)
+                    continue;
                 char *arcfname = fname;
                 exists = partOfMountPoint(i, arcfname);
                 if (exists)
@@ -3188,6 +3195,8 @@ int PHYSFS_stat(const char *_fname, PHYSFS_Stat *stat)
                     if ((retval) || (currentErrorCode() != PHYSFS_ERR_NOT_FOUND))
                         exists = 1;
                 } /* else if */
+                if (mountPoint)
+                    break;
             } /* for */
         } /* else */
     } /* if */

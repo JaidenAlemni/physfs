@@ -2911,6 +2911,7 @@ typedef struct PHYSFS_Stat
  * \sa PHYSFS_Stat
  */
 PHYSFS_DECL int PHYSFS_stat(const char *fname, PHYSFS_Stat *stat);
+PHYSFS_DECL int PHYSFS_statFromMountPoint(const char *fname, PHYSFS_Stat *stat, const char *mountPoint);
 
 
 /**
