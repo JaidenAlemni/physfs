@@ -95,7 +95,7 @@ static void *WAD_openArchive(PHYSFS_Io *io, const char *name,
 
     BAIL_IF_ERRPASS(!io->seek(io, directoryOffset), 0);
 
-    unpkarc = UNPK_openArchive(io, 0, 1);
+    unpkarc = UNPK_openArchiveWithEntryCount(io, 0, 1, count);
     BAIL_IF_ERRPASS(!unpkarc, NULL);
 
     if (!wadLoadEntries(io, count, unpkarc))

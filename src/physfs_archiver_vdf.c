@@ -130,7 +130,7 @@ static void *VDF_openArchive(PHYSFS_Io *io, const char *name,
     BAIL_IF_ERRPASS(!io->seek(io, rootCatOffset), NULL);
 
     /* !!! FIXME: check case_sensitive and only_usascii params for this archive. */
-    unpkarc = UNPK_openArchive(io, 1, 0);
+    unpkarc = UNPK_openArchiveWithEntryCount(io, 1, 0, count);
     BAIL_IF_ERRPASS(!unpkarc, NULL);
 
     if (!vdfLoadEntries(io, count, vdfDosTimeToEpoch(timestamp), unpkarc))

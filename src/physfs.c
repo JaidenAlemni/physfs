@@ -3302,6 +3302,11 @@ static void setDefaultAllocator(void)
 
 int __PHYSFS_DirTreeInit(__PHYSFS_DirTree *dt, const size_t entrylen, const int case_sensitive, const int only_usascii)
 {
+    return __PHYSFS_DirTreeInitWithEntryCount(dt, entrylen, case_sensitive, only_usascii, 0);
+}
+
+int __PHYSFS_DirTreeInitWithEntryCount(__PHYSFS_DirTree *dt, const size_t entrylen, const int case_sensitive, const int only_usascii, const PHYSFS_uint64 entry_count)
+{
     static char rootpath[2] = { '/', '\0' };
     size_t alloclen;
 
@@ -3316,12 +3321,56 @@ int __PHYSFS_DirTreeInit(__PHYSFS_DirTree *dt, const size_t entrylen, const int 
     memset(dt->root, '\0', entrylen);
     dt->root->name = rootpath;
     dt->root->isdir = 1;
-    dt->hashBuckets = 64;
-    if (!dt->hashBuckets)
-        dt->hashBuckets = 1;
+
+    PHYSFS_uint32 hashBuckets;
+
+    if (entry_count)
+    {
+        /*
+         * The target number of items we allow into buckets. Only use powers of 2.
+         * 16 was picked somewhat arbitrarily.
+         */
+        const unsigned int maxLoadPow = 4;
+
+        /*
+         * Set a limit to the number of files we'll consider for sanity reasons.
+         * 2^20 gets us about a million, which seems reasonable.
+         * With a maxLoadPow of 4, that would mean 65,536 buckets at the highest.
+         */
+        const unsigned int hashBucketsMaxPow = 20;
+
+        if (entry_count > (hashBucketsMaxPow ? 1 << (hashBucketsMaxPow - 1) : 0))
+        {
+            hashBuckets = 1 << (hashBucketsMaxPow > maxLoadPow ? hashBucketsMaxPow - maxLoadPow : 0);
+        } /* if */
+        else
+        {
+            hashBuckets = entry_count - 1;
+            PHYSFS_uint32 i;
+            for (i = 1; i < 8 * sizeof (entry_count); i <<= 1)
+                hashBuckets |= hashBuckets >> i;
+            hashBuckets++;
+
+            hashBuckets >>= maxLoadPow;
+
+            if (!hashBuckets)
+                hashBuckets = 1;
+        } /* else */
+    } /* if */
+    else
+    {
+        /*
+         * Fall back to the default 64 buckets for any archivers
+         * that haven't been updated to report the file count.
+         */
+        hashBuckets = 64;
+    } /* else */
+
+    dt->hashBuckets = hashBuckets - 1;
+
     dt->entrylen = entrylen;
 
-    alloclen = dt->hashBuckets * sizeof (__PHYSFS_DirTreeEntry *);
+    alloclen = (dt->hashBuckets + 1) * sizeof (__PHYSFS_DirTreeEntry *);
     dt->hash = (__PHYSFS_DirTreeEntry **) allocator.Malloc(alloclen);
     BAIL_IF(!dt->hash, PHYSFS_ERR_OUT_OF_MEMORY, 0);
     memset(dt->hash, '\0', alloclen);
@@ -3333,7 +3382,7 @@ int __PHYSFS_DirTreeInit(__PHYSFS_DirTree *dt, const size_t entrylen, const int 
 static PHYSFS_uint32 hashPathName(__PHYSFS_DirTree *dt, const char *name)
 {
     const PHYSFS_uint32 hashval = dt->case_sensitive ? __PHYSFS_hashString(name) : dt->only_usascii ? __PHYSFS_hashStringCaseFoldUSAscii(name) : __PHYSFS_hashStringCaseFold(name);
-    return hashval % dt->hashBuckets;
+    return hashval & dt->hashBuckets;
 } /* hashPathName */
 
 
@@ -3463,7 +3512,7 @@ void __PHYSFS_DirTreeDeinit(__PHYSFS_DirTree *dt)
     if (dt->hash)
     {
         size_t i;
-        for (i = 0; i < dt->hashBuckets; i++)
+        for (i = 0; i < (dt->hashBuckets + 1); i++)
         {
             __PHYSFS_DirTreeEntry *entry;
             __PHYSFS_DirTreeEntry *next;

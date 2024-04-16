@@ -388,6 +388,7 @@ int __PHYSFS_readAll(PHYSFS_Io *io, void *buf, const size_t len);
 
 /* LOTS of legacy formats that only use US ASCII, not actually UTF-8, so let them optimize here. */
 void *UNPK_openArchive(PHYSFS_Io *io, const int case_sensitive, const int only_usascii);
+void *UNPK_openArchiveWithEntryCount(PHYSFS_Io *io, const int case_sensitive, const int only_usascii, const PHYSFS_uint32 entry_count);
 void UNPK_abandonArchive(void *opaque);
 void UNPK_closeArchive(void *opaque);
 void *UNPK_addEntry(void *opaque, char *name, const int isdir,
@@ -428,6 +429,7 @@ typedef struct __PHYSFS_DirTree
 
 /* LOTS of legacy formats that only use US ASCII, not actually UTF-8, so let them optimize here. */
 int __PHYSFS_DirTreeInit(__PHYSFS_DirTree *dt, const size_t entrylen, const int case_sensitive, const int only_usascii);
+int __PHYSFS_DirTreeInitWithEntryCount(__PHYSFS_DirTree *dt, const size_t entrylen, const int case_sensitive, const int only_usascii, const PHYSFS_uint64 entry_count);
 void *__PHYSFS_DirTreeAdd(__PHYSFS_DirTree *dt, char *name, const int isdir);
 void *__PHYSFS_DirTreeFind(__PHYSFS_DirTree *dt, const char *path);
 PHYSFS_EnumerateCallbackResult __PHYSFS_DirTreeEnumerate(void *opaque,

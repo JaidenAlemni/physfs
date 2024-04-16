@@ -287,10 +287,14 @@ void *UNPK_addEntry(void *opaque, char *name, const int isdir,
 
 void *UNPK_openArchive(PHYSFS_Io *io, const int case_sensitive, const int only_usascii)
 {
+    return UNPK_openArchiveWithEntryCount(io, case_sensitive, only_usascii, 0);
+}
+void *UNPK_openArchiveWithEntryCount(PHYSFS_Io *io, const int case_sensitive, const int only_usascii, const PHYSFS_uint32 entry_count)
+{
     UNPKinfo *info = (UNPKinfo *) allocator.Malloc(sizeof (UNPKinfo));
     BAIL_IF(!info, PHYSFS_ERR_OUT_OF_MEMORY, NULL);
 
-    if (!__PHYSFS_DirTreeInit(&info->tree, sizeof (UNPKentry), case_sensitive, only_usascii))
+    if (!__PHYSFS_DirTreeInitWithEntryCount(&info->tree, sizeof (UNPKentry), case_sensitive, only_usascii, entry_count))
     {
         allocator.Free(info);
         return NULL;

@@ -1490,7 +1490,7 @@ static void *ZIP_openArchive(PHYSFS_Io *io, const char *name,
 
     if (!zip_parse_end_of_central_dir(info, &dstart, &cdir_ofs, &count))
         goto ZIP_openarchive_failed;
-    else if (!__PHYSFS_DirTreeInit(&info->tree, sizeof (ZIPentry), 1, 0))
+    else if (!__PHYSFS_DirTreeInitWithEntryCount(&info->tree, sizeof (ZIPentry), 1, 0, count))
         goto ZIP_openarchive_failed;
 
     root = (ZIPentry *) info->tree.root;

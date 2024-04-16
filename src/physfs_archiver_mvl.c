@@ -70,7 +70,7 @@ static void *MVL_openArchive(PHYSFS_Io *io, const char *name,
     BAIL_IF_ERRPASS(!__PHYSFS_readAll(io, &count, sizeof(count)), NULL);
     count = PHYSFS_swapULE32(count);
 
-    unpkarc = UNPK_openArchive(io, 0, 1);
+    unpkarc = UNPK_openArchiveWithEntryCount(io, 0, 1, count);
     BAIL_IF_ERRPASS(!unpkarc, NULL);
 
     if (!mvlLoadEntries(io, count, unpkarc))
