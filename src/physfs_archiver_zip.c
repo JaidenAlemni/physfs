@@ -992,11 +992,33 @@ static PHYSFS_sint64 zip_dos_time_to_physfs_time(PHYSFS_uint32 dostime)
     return ((PHYSFS_sint64) mktime(&unixtime));
 } /* zip_dos_time_to_physfs_time */
 
+static int zip_update_header_buffer(ZIPinfo *info, void *buf, PHYSFS_Io *io,
+                                    const PHYSFS_uint64 bufSize, PHYSFS_sint64 pos,
+                                    PHYSFS_uint64 *cdSize)
+{
+    void *bufOff;
+    size_t bufOffSize = bufSize - pos;
+    if (pos != bufSize)
+    {
+        bufOff = buf + pos;
+        memmove(buf, bufOff, bufOffSize);
+    } /* if */
+    if (pos > *cdSize)
+        pos = *cdSize;
+    *cdSize -= pos;
+    bufOff = buf + bufOffSize;
+    BAIL_IF_ERRPASS(!__PHYSFS_readAll(info->io, bufOff, pos), 0);
+    BAIL_IF_ERRPASS(!io->seek(io, 0), 0);
+    
+    return 1;
+} /* zip_update_header_buffer */
+
 
 static ZIPentry *zip_load_entry(ZIPinfo *info, const int zip64,
-                                const PHYSFS_uint64 ofs_fixup)
+                                const PHYSFS_uint64 ofs_fixup,
+                                PHYSFS_Io *io, const PHYSFS_uint8 useSmallBuffer,
+                                void *buf, const PHYSFS_uint64 bufSize, PHYSFS_uint64 *cdSize)
 {
-    PHYSFS_Io *io = info->io;
     ZIPentry entry;
     ZIPentry *retval = NULL;
     PHYSFS_uint16 fnamelen, extralen, commentlen;
@@ -1036,6 +1058,17 @@ static ZIPentry *zip_load_entry(ZIPinfo *info, const int zip64,
     BAIL_IF_ERRPASS(!readui32(io, &external_attr), NULL);
     BAIL_IF_ERRPASS(!readui32(io, &ui32), NULL);
     offset = (PHYSFS_uint64) ui32;
+
+    if (useSmallBuffer)
+    {
+        PHYSFS_sint64 pos = io->tell(io);
+        BAIL_IF_ERRPASS(pos == -1, NULL);
+        
+        if ((bufSize - pos) < fnamelen)
+        {
+            BAIL_IF_ERRPASS(!zip_update_header_buffer(info, buf, io, bufSize, pos, cdSize), NULL);
+        } /* if */
+    } /* if */
 
     name = (char *) __PHYSFS_smallAlloc(fnamelen + 1);
     BAIL_IF(!name, PHYSFS_ERR_OUT_OF_MEMORY, NULL);
@@ -1089,6 +1122,12 @@ static ZIPentry *zip_load_entry(ZIPinfo *info, const int zip64,
           (retval->compressed_size == 0xFFFFFFFF) ||
           (retval->uncompressed_size == 0xFFFFFFFF)) )
     {
+        if (useSmallBuffer && ((bufSize - si64) < extralen))
+        {
+            BAIL_IF_ERRPASS(!zip_update_header_buffer(info, buf, io, bufSize, si64, cdSize), NULL);
+            si64 = 0;
+        } /* if */
+        
         int found = 0;
         PHYSFS_uint16 sig = 0;
         PHYSFS_uint16 len = 0;
@@ -1147,7 +1186,23 @@ static ZIPentry *zip_load_entry(ZIPinfo *info, const int zip64,
     retval->offset = offset + ofs_fixup;
 
     /* seek to the start of the next entry in the central directory... */
-    BAIL_IF_ERRPASS(!io->seek(io, si64 + extralen + commentlen), NULL);
+    if (useSmallBuffer)
+    {
+        PHYSFS_uint64 seekTo = si64 + extralen + commentlen;
+        if (seekTo > bufSize)
+        {
+            PHYSFS_sint64 pos = info->io->tell(info->io);
+            BAIL_IF_ERRPASS(pos == -1, NULL);
+            PHYSFS_uint64 diff = seekTo - bufSize;
+            BAIL_IF_ERRPASS(!info->io->seek(info->io, pos + diff), NULL);
+            *cdSize -= diff;
+            BAIL_IF_ERRPASS(!io->seek(io, bufSize), NULL);
+        } /* if */
+        else
+            BAIL_IF_ERRPASS(!io->seek(io, seekTo), NULL);
+    } /* if */
+    else
+        BAIL_IF_ERRPASS(!io->seek(io, si64 + extralen + commentlen), NULL);
 
     return retval;  /* success. */
 } /* zip_load_entry */
@@ -1157,23 +1212,66 @@ static ZIPentry *zip_load_entry(ZIPinfo *info, const int zip64,
 static int zip_load_entries(ZIPinfo *info,
                             const PHYSFS_uint64 data_ofs,
                             const PHYSFS_uint64 central_ofs,
-                            const PHYSFS_uint64 entry_count)
+                            const PHYSFS_uint64 entry_count,
+                            PHYSFS_uint64 cdSize)
 {
     PHYSFS_Io *io = info->io;
     const int zip64 = info->zip64;
     PHYSFS_uint64 i;
+    int retval = 0;
 
     BAIL_IF_ERRPASS(!io->seek(io, central_ofs), 0);
 
+    /*
+     * Doing so many small reads in zip_load_entry is slow if we do it directly from the file.
+     * Copying the central directory to memory first and reading that instead is much faster.
+     * Copying it in 1 MiB increments seems like it should work fine for most archives.
+     * Note: bufSize *must* be *at least* 64 KiB, as that's the max size of the filename and extra fields
+     */
+    void *buf = NULL;
+    size_t bufSize = 1024 * 1024; // 1 MiB
+    PHYSFS_uint8 useSmallBuffer = cdSize > bufSize;
+    if (!useSmallBuffer)
+        bufSize = cdSize;
+
+    buf = allocator.Malloc(bufSize);
+    BAIL_IF(!buf, PHYSFS_ERR_OUT_OF_MEMORY, 0);
+    GOTO_IF_ERRPASS(!__PHYSFS_readAll(io, buf, bufSize), ZIP_open_entries_finish);
+    cdSize -= bufSize;
+
+    io = __PHYSFS_createMemoryIo(buf, bufSize, NULL);
+    GOTO_IF_ERRPASS(!io, ZIP_open_entries_finish);
+
     for (i = 0; i < entry_count; i++)
     {
-        ZIPentry *entry = zip_load_entry(info, zip64, data_ofs);
-        BAIL_IF_ERRPASS(!entry, 0);
+        if (useSmallBuffer)
+        {
+            PHYSFS_sint64 pos = io->tell(io);
+            GOTO_IF_ERRPASS(pos == -1, ZIP_open_entries_finish);
+            
+            if ((bufSize - pos) < 46)
+            {
+                GOTO_IF_ERRPASS(!zip_update_header_buffer(info, buf, io, bufSize, pos, &cdSize),
+                                ZIP_open_entries_finish);
+            } /* if */
+        } /* if */
+
+        ZIPentry *entry = zip_load_entry(info, zip64, data_ofs, io, useSmallBuffer, buf, bufSize, &cdSize);
+        GOTO_IF_ERRPASS(!entry, ZIP_open_entries_finish);
         if (zip_entry_is_tradional_crypto(entry))
             info->has_crypto = 1;
     } /* for */
 
-    return 1;
+    retval = 1;
+
+ZIP_open_entries_finish:
+    /* Free the buffer and io */
+    if (buf)
+        allocator.Free(buf);
+    if (io && (io != info->io))
+        io->destroy(io);
+
+    return retval;
 } /* zip_load_entries */
 
 
@@ -1270,7 +1368,8 @@ static int zip64_parse_end_of_central_dir(ZIPinfo *info,
                                           PHYSFS_uint64 *data_start,
                                           PHYSFS_uint64 *dir_ofs,
                                           PHYSFS_uint64 *entry_count,
-                                          PHYSFS_sint64 pos)
+                                          PHYSFS_sint64 pos,
+                                          PHYSFS_uint64 *cdSize)
 {
     PHYSFS_Io *io = info->io;
     PHYSFS_uint64 ui64;
@@ -1344,7 +1443,7 @@ static int zip64_parse_end_of_central_dir(ZIPinfo *info,
     BAIL_IF(ui64 != *entry_count, PHYSFS_ERR_CORRUPT, 0);
 
     /* size of the central directory */
-    BAIL_IF_ERRPASS(!readui64(io, &ui64), 0);
+    BAIL_IF_ERRPASS(!readui64(io, cdSize), 0);
 
     /* offset of central directory */
     BAIL_IF_ERRPASS(!readui64(io, dir_ofs), 0);
@@ -1364,7 +1463,8 @@ static int zip64_parse_end_of_central_dir(ZIPinfo *info,
 static int zip_parse_end_of_central_dir(ZIPinfo *info,
                                         PHYSFS_uint64 *data_start,
                                         PHYSFS_uint64 *dir_ofs,
-                                        PHYSFS_uint64 *entry_count)
+                                        PHYSFS_uint64 *entry_count,
+                                        PHYSFS_uint64 *cdSize)
 {
     PHYSFS_Io *io = info->io;
     PHYSFS_uint16 entryCount16;
@@ -1387,7 +1487,7 @@ static int zip_parse_end_of_central_dir(ZIPinfo *info,
     /* Seek back to see if "Zip64 end of central directory locator" exists. */
     /* this record is 20 bytes before end-of-central-dir */
     rc = zip64_parse_end_of_central_dir(info, data_start, dir_ofs,
-                                        entry_count, pos - 20);
+                                        entry_count, pos - 20, cdSize);
 
     /* Error or success? Bounce out of here. Keep going if not zip64. */
     if ((rc == 0) || (rc == 1))
@@ -1417,6 +1517,7 @@ static int zip_parse_end_of_central_dir(ZIPinfo *info,
 
     /* size of the central directory */
     BAIL_IF_ERRPASS(!readui32(io, &ui32), 0);
+    *cdSize = (PHYSFS_uint64) ui32;
 
     /* offset of central directory */
     BAIL_IF_ERRPASS(!readui32(io, &offset32), 0);
@@ -1488,7 +1589,9 @@ static void *ZIP_openArchive(PHYSFS_Io *io, const char *name,
 
     info->io = io;
 
-    if (!zip_parse_end_of_central_dir(info, &dstart, &cdir_ofs, &count))
+    PHYSFS_uint64 cdSize;
+
+    if (!zip_parse_end_of_central_dir(info, &dstart, &cdir_ofs, &count, &cdSize))
         goto ZIP_openarchive_failed;
     else if (!__PHYSFS_DirTreeInitWithEntryCount(&info->tree, sizeof (ZIPentry), 1, 0, count))
         goto ZIP_openarchive_failed;
@@ -1496,7 +1599,7 @@ static void *ZIP_openArchive(PHYSFS_Io *io, const char *name,
     root = (ZIPentry *) info->tree.root;
     root->resolved = ZIP_DIRECTORY;
 
-    if (!zip_load_entries(info, dstart, cdir_ofs, count))
+    if (!zip_load_entries(info, dstart, cdir_ofs, count, cdSize))
         goto ZIP_openarchive_failed;
 
     assert(info->tree.root->sibling == NULL);
