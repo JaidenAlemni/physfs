@@ -1661,7 +1661,7 @@ static int ZIP_stat(void *opaque, const char *filename, PHYSFS_Stat *stat)
     if (entry == NULL)
         return 0;
 
-    else if (!zip_resolve(info->io, info, entry))
+    else if (entry->resolved != ZIP_UNRESOLVED_FILE && !zip_resolve(info->io, info, entry))
         return 0;
 
     else if (entry->resolved == ZIP_DIRECTORY)
