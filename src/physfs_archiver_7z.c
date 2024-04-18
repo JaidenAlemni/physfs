@@ -286,7 +286,8 @@ static PHYSFS_Io *SZIP_openRead(void *opaque, const char *path)
                         &blockIndex, &outBuffer, &outBufferSize, &offset,
                         &outSizeProcessed, alloc, alloc);
     GOTO_IF(rc != SZ_OK, szipErrorCode(rc), SZIP_openRead_failed);
-    GOTO_IF(outBuffer == NULL, PHYSFS_ERR_OUT_OF_MEMORY, SZIP_openRead_failed);
+    GOTO_IF((outBuffer == NULL) && (SzArEx_GetFileSize(&info->db, entry->dbidx) != 0),
+            PHYSFS_ERR_OUT_OF_MEMORY, SZIP_openRead_failed);
 
     io->destroy(io);
     io = NULL;
